@@ -87,7 +87,7 @@ class ScholarBot:
     def __post_link_to_articles(self, submission):
         url = '/'.join(['http://ge.tt', self.__current_share['sharename']])
         submission.add_comment(url)
-        #time.sleep(610)
+        time.sleep(610)
 
     def __delete_old(self, hours=24):
         now = datetime.datetime.now()
@@ -95,7 +95,10 @@ class ScholarBot:
         for share in shares:
             if (now - share['created']).total_seconds() / 3600 > hours:
                 share.destroy()
-        time.sleep(6)
+        if self.__config['dry'] is False:
+            time.sleep(60)
+        else:
+            time.sleep(4)
 
     def __get_new_requests(self):
         for submission in self.__subreddit.get_hot(limit=20):
@@ -120,12 +123,14 @@ class ScholarBot:
                         self.__share(filepath, url)
                     else:
                         self.__current_share.destroy()
-                #self.__post_link_to_articles(submission)
+                if self.__config['dry'] is False:
+                    self.__post_link_to_articles(submission)
             self.__done.append(submission)
         self.__todo = []
 
     def run(self):
-        self.__delete_old(hours=0)
+        if self.__config['dry']:
+            self.__delete_old(hours=0)
         while True:
             self.__get_new_requests()
             self.__process_requests()
@@ -149,7 +154,8 @@ def parse_config(config_file):
 
 def main(args):
     config = parse_config(args.config_file)
-    scholar_bot = ScholarBot(config = config)
+    config['dry'] = args.dry
+    scholar_bot = ScholarBot(config=config)
     scholar_bot.run()
 
 
