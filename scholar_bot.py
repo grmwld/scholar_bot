@@ -102,7 +102,7 @@ class ScholarBot:
 
     def __get_new_requests(self):
         for submission in self.__subreddit.get_hot(limit=20):
-            if submission not in self.__done:
+            if submission not in self.__done and len(submission.comments) == 0:
                 self.__todo.append(submission)
 
     def __process_requests(self):
