@@ -6,6 +6,7 @@ import sys
 import argparse
 import shutil
 import time
+import logging
 import re
 import datetime
 import urllib
@@ -59,7 +60,7 @@ class ScholarBot:
         if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
             self.__ez_authenticate()
         for link in self.__br.links(text_regex='(Full.*Text.*PDF.*)|(.*Download.*PDF.*)'):
-            #print link.text, link.url
+            logging.debug('\t\t' + ' ==> '.join([link.text, link.url]))
             if link.url.endswith('pdf+html'):
                 pdf_url = link.url[:-5]
                 break
@@ -79,8 +80,8 @@ class ScholarBot:
         try:
             self.__current_share.create_file({'filename': name})
             self.__current_share.upload_file(filepath)
-        except rest.ApiError:
-            pass
+        except rest.ApiError as e:
+            logging.error(' ' + e.msg)
         finally:
             os.remove(filepath)
 
@@ -92,32 +93,39 @@ class ScholarBot:
     def __delete_old(self, hours=24):
         now = datetime.datetime.now()
         shares = self.__gett.shares()
+        old_shares = 0
         for share in shares:
             if (now - share['created']).total_seconds() / 3600 > hours:
+                old_shares += 1
+                logging.debug(' Destroying old share ' + share.sharename)
                 share.destroy()
+        logging.info(' Destroyed ' + str(old_shares) + ' old shares')
         if self.__config['dry'] is False:
-            time.sleep(60)
+            time.sleep(600)
         else:
             time.sleep(4)
 
     def __get_new_requests(self):
-        for submission in self.__subreddit.get_hot(limit=20):
+        for submission in self.__subreddit.get_hot(limit=100):
             if submission not in self.__done and len(submission.comments) == 0:
                 self.__todo.append(submission)
+        logging.info('')
+        logging.info(' Found ' + str(len(self.__todo)) + ' new submissions to process')
 
     def __process_requests(self):
         for submission in self.__todo:
-            #print
-            #print '---'
-            #print submission.title
+            logging.info(' -------')
+            logging.info(' ' + submission.title)
+            logging.debug(' \tSubmission text\n\n' + submission.selftext + '\n')
             urls = [i[0].strip('(){}[]') for i in REGEX_URL.findall(submission.selftext)]
             urls = [u for u in urls if u.startswith('http://www.ncbi.nlm') is False]
             if len(urls) > 0:
                 urls = map(self.__add_proxy_to_url, urls)
                 urls = list(set(urls))
                 self.__current_share = self.__gett.create_share({'title': submission.title})
+                logging.info(' found ' + str(len(urls)) + ' links')
                 for url in urls:
-                    #print '\t', url
+                    logging.debug(' @@@ ' + url)
                     filepath = self.__fetch_pdf(url)
                     if filepath:
                         self.__share(filepath, url)
@@ -153,6 +161,13 @@ def parse_config(config_file):
 
 
 def main(args):
+
+    logging.getLogger('requests').setLevel(logging.WARNING)
+    numeric_level = getattr(logging, args.loglevel.upper(), None)
+    if not isinstance(numeric_level, int):
+        raise ValueError('Invalid log level: %s' % loglevel)
+    logging.basicConfig(level=numeric_level) 
+    
     config = parse_config(args.config_file)
     config['dry'] = args.dry
     scholar_bot = ScholarBot(config=config)
@@ -173,6 +188,18 @@ if __name__ == '__main__':
         action='store_true',
         default=False,
         help='Do not post link in comments'
+    )
+    parser.add_argument(
+        '-l', '--loglevel', dest='loglevel',
+        choices=['debug', 'info', 'warning', 'error', 'critical'],
+        default='info',
+        help='Logging level'
+    )
+    parser.add_argument(
+        '-o', '--logfile', dest='logfile',
+        type=argparse.FileType('a'),
+        default=sys.stderr,
+        help='Where should the logging data be stored'
     )
     main(parser.parse_args())
 

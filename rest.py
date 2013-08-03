@@ -220,7 +220,7 @@ class Share(properties.Properties):
 	file_cls = None
 
 	def __new__(cls, *args, **kwargs):
-		instance = super(Share, cls).__new__(cls, *args, **kwargs)
+		instance = super(Share, cls).__new__(cls)
 
 		instance.update = types.MethodType(_update_share, instance, cls)
 		instance.destroy = types.MethodType(_destroy_share, instance, cls)
@@ -344,7 +344,7 @@ def _host(url):
 
 class File(properties.Properties):
 	def __new__(cls, *args, **kwargs):
-		instance = super(File, cls).__new__(cls, *args, **kwargs)
+		instance = super(File, cls).__new__(cls)
 		instance.destroy = types.MethodType(_destroy_file, instance, cls)
 
 		return instance
