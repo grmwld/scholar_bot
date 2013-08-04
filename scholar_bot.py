@@ -106,34 +106,42 @@ class ScholarBot:
             time.sleep(4)
 
     def __get_new_requests(self):
-        for submission in self.__subreddit.get_hot(limit=100):
+        c = 0
+        logging.info('\n\n ::::::::::::::::::::::::::::\n :::: Fetching new posts ::::\n ::::::::::::::::::::::::::::\n')
+        for submission in self.__subreddit.get_hot(limit=20):
+            c += 1
             if submission not in self.__done and len(submission.comments) == 0:
                 self.__todo.append(submission)
-        logging.info('')
-        logging.info(' Found ' + str(len(self.__todo)) + ' new submissions to process')
+        logging.info(' Found ' + str(len(self.__todo)) + ' new submissions to process (out of ' + str(c) + ')')
 
     def __process_requests(self):
         for submission in self.__todo:
-            logging.info(' -------')
-            logging.info(' ' + submission.title)
-            logging.debug(' \tSubmission text\n\n' + submission.selftext + '\n')
+            logging.info('\n \t======== BEGIN  SUBMISSION =======')
+            logging.info(' \t' + '\n \t'.join([submission.title[i:i+80] for i in range(0, len(submission.title), 80)]))
+            logging.debug(' \t--- begin submission text ---')
+            logging.debug(' \t> ' + submission.selftext.replace('\n', '\n \t> '))
+            logging.debug(' \t---  end submission text  ---')
             urls = [i[0].strip('(){}[]') for i in REGEX_URL.findall(submission.selftext)]
             urls = [u for u in urls if u.startswith('http://www.ncbi.nlm') is False]
             if len(urls) > 0:
                 urls = map(self.__add_proxy_to_url, urls)
                 urls = list(set(urls))
                 self.__current_share = self.__gett.create_share({'title': submission.title})
-                logging.info(' found ' + str(len(urls)) + ' links')
+                logging.info(' \tFound ' + str(len(urls)) + ' links')
+                shared_count = 0
                 for url in urls:
-                    logging.debug(' @@@ ' + url)
+                    logging.debug(' \t\t' + url)
                     filepath = self.__fetch_pdf(url)
                     if filepath:
+                        shared_count += 1
                         self.__share(filepath, url)
-                    else:
-                        self.__current_share.destroy()
-                if self.__config['dry'] is False:
-                    self.__post_link_to_articles(submission)
+                if shared_count:
+                    if self.__config['dry'] is False:
+                        self.__post_link_to_articles(submission)
+                else:
+                    self.__current_share.destroy()
             self.__done.append(submission)
+            logging.info(' \t========   END  SUBMISSION  ======')
         self.__todo = []
 
     def run(self):
@@ -166,7 +174,8 @@ def main(args):
     numeric_level = getattr(logging, args.loglevel.upper(), None)
     if not isinstance(numeric_level, int):
         raise ValueError('Invalid log level: %s' % loglevel)
-    logging.basicConfig(level=numeric_level) 
+    logformat = '%(message)s'
+    logging.basicConfig(level=numeric_level, format=logformat) 
     
     config = parse_config(args.config_file)
     config['dry'] = args.dry
