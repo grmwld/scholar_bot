@@ -12,6 +12,7 @@ import datetime
 import urllib
 import urllib2
 import mechanize
+from BeautifulSoup import BeautifulSoup
 import praw
 import rest
 
@@ -21,8 +22,9 @@ REGEX_DOMAIN = re.compile(r'(https?://([-\w\.]+)+(:\d+)?)')
 
 
 class ScholarBot:
-    def __init__(self, config):
+    def __init__(self, config, batch_size=10):
         self.__config = config
+        self.__batch_size = batch_size
         self.__user_agent = user_agent = ("Scholar bot 0.01 by /u/leap_down_here")
         self.__r = praw.Reddit(user_agent=self.__user_agent)
         self.__r.login(self.__config['reddit_usr'] , self.__config['reddit_pwd'])
@@ -37,11 +39,21 @@ class ScholarBot:
             'password': self.__config['gett_pwd']
         })
 
-    def __ez_authenticate(self):
-        self.__br.select_form(nr=0)
-        self.__br['username'] = self.__config['ez_usr']
-        self.__br['password'] = self.__config['ez_pwd']
-        self.__br.submit()
+    def __ez_authenticate(self, url):
+        try:
+            raw_url = url
+            self.__br.open(url)
+            url = self.__add_proxy_to_url(self.__br.response().geturl())
+            logging.debug(' \t' + raw_url + '\n \t\t~~> ' + url)
+            self.__br.open(url)
+        except urllib2.HTTPError, e:
+            logging.warning(' \tWARNING: ' + e.msg)
+        if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
+            self.__br.select_form(nr=0)
+            self.__br['username'] = self.__config['ez_usr']
+            self.__br['password'] = self.__config['ez_pwd']
+            self.__br.submit()
+        return url
 
     def __add_proxy_to_url(self, url):
         u = [p for p in url.split('/') if p]
@@ -49,18 +61,23 @@ class ScholarBot:
         u[1] = u[1] + '.gate1.inist.fr'
         return '/'.join(u)
 
+    def __resolve_ncbi(self, url):
+        self.__br.open(url)
+        logging.info(' \tResolving an NCBI link')
+        page = BeautifulSoup(self.__br.response().read())
+        try:
+            linkout = page.find('div', {'class': 'linkoutlist'}).findNext('ul').findAll('a')[0]
+            url = linkout.get('href')
+            logging.debug(' \t\tNCBI ==> ' + url)
+        except AttributeError:
+            pass
+        return url
+
     def __fetch_pdf(self, url):
         filepath = None
         pdf_url = None
         domain = REGEX_DOMAIN.search(url).group()
-        try:
-            self.__br.open(url)
-        except urllib2.HTTPError, e:
-            return None
-        if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
-            self.__ez_authenticate()
-        for link in self.__br.links(text_regex='(Full.*Text.*PDF.*)|(.*Download.*PDF.*)'):
-            logging.debug('\t\t' + ' ==> '.join([link.text, link.url]))
+        for link in self.__br.links(text_regex='(Full.*Text.*PDF.*)|(.*Download.*PDF.*)|(.*PDF.*\([0-9]+.*\))'):
             if link.url.endswith('pdf+html'):
                 pdf_url = link.url[:-5]
                 break
@@ -68,10 +85,10 @@ class ScholarBot:
                 pdf_url = link.url
                 break
         if pdf_url:
-            try:
-                filepath = self.__br.retrieve(pdf_url)[0]
-            except ValueError:
-                filepath = self.__br.retrieve('/'.join([domain, pdf_url]))[0]
+            if pdf_url.startswith('/'):
+                pdf_url = '/'.join([domain, pdf_url])
+            filepath = self.__br.retrieve(pdf_url)[0]
+            logging.debug('\t\t' + ' ==> '.join([link.text, pdf_url]))
             shutil.move(filepath, filepath+'.pdf')
             filepath += '.pdf'
         return filepath
@@ -108,7 +125,7 @@ class ScholarBot:
     def __get_new_requests(self):
         c = 0
         logging.info('\n\n ::::::::::::::::::::::::::::\n :::: Fetching new posts ::::\n ::::::::::::::::::::::::::::\n')
-        for submission in self.__subreddit.get_hot(limit=20):
+        for submission in self.__subreddit.get_hot(limit=self.__batch_size):
             c += 1
             if submission not in self.__done and len(submission.comments) == 0:
                 self.__todo.append(submission)
@@ -121,16 +138,16 @@ class ScholarBot:
             logging.debug(' \t--- begin submission text ---')
             logging.debug(' \t> ' + submission.selftext.replace('\n', '\n \t> '))
             logging.debug(' \t---  end submission text  ---')
-            urls = [i[0].strip('(){}[]') for i in REGEX_URL.findall(submission.selftext)]
-            urls = [u for u in urls if u.startswith('http://www.ncbi.nlm') is False]
+            urls = list(set([i[0].strip('(){}[]') for i in REGEX_URL.findall(submission.selftext)]))
             if len(urls) > 0:
-                urls = map(self.__add_proxy_to_url, urls)
-                urls = list(set(urls))
                 self.__current_share = self.__gett.create_share({'title': submission.title})
                 logging.info(' \tFound ' + str(len(urls)) + ' links')
                 shared_count = 0
                 for url in urls:
                     logging.debug(' \t\t' + url)
+                    if url.startswith('http://www.ncbi.nlm.nih.gov'):
+                        url = self.__resolve_ncbi(url)
+                    url = self.__ez_authenticate(url)
                     filepath = self.__fetch_pdf(url)
                     if filepath:
                         shared_count += 1
@@ -179,7 +196,7 @@ def main(args):
     
     config = parse_config(args.config_file)
     config['dry'] = args.dry
-    scholar_bot = ScholarBot(config=config)
+    scholar_bot = ScholarBot(config=config, batch_size=args.batch_size)
     scholar_bot.run()
 
 
@@ -191,6 +208,12 @@ if __name__ == '__main__':
         nargs='?',
         default=sys.stdin,
         help='Input file'
+    )
+    parser.add_argument(
+        '-b', '--batch_size', dest='batch_size',
+        type=int,
+        default=10,
+        help='Number of posts to fetch'
     )
     parser.add_argument(
         '-d', '--dry', dest='dry',
