@@ -23,9 +23,8 @@ REGEX_DOMAIN = re.compile(r'(https?://([-\w\.]+)+(:\d+)?)')
 
 
 class ScholarBot:
-    def __init__(self, config, batch_size=10):
+    def __init__(self, config):
         self.__config = config
-        self.__batch_size = batch_size
         self.__user_agent = user_agent = ("Scholar bot 0.01 by /u/leap_down_here")
         self.__r = praw.Reddit(user_agent=self.__user_agent)
         self.__r.login(self.__config['reddit_usr'] , self.__config['reddit_pwd'])
@@ -88,11 +87,14 @@ class ScholarBot:
         if pdf_url:
             if pdf_url.startswith('/'):
                 pdf_url = '/'.join([domain, pdf_url])
-            filepath = self.__br.retrieve(pdf_url)[0]
-            logging.debug('\t\t' + ' ==> '.join([link.text, pdf_url]))
-            shutil.move(filepath, filepath+'.pdf')
-            filepath += '.pdf'
-            filepath = self.__check_pdf(filepath)
+            try:
+                logging.debug('\t\t' + ' ==> '.join([link.text, pdf_url]))
+                filepath = self.__br.retrieve(pdf_url)[0]
+                shutil.move(filepath, filepath+'.pdf')
+                filepath += '.pdf'
+                filepath = self.__check_pdf(filepath)
+            except mechanize.HTTPError:
+                pass
         return filepath
 
     def __check_pdf(self, filepath):
@@ -135,16 +137,20 @@ class ScholarBot:
     def __get_new_requests(self):
         c = 0
         logging.info('\n\n ::::::::::::::::::::::::::::\n :::: Fetching new posts ::::\n ::::::::::::::::::::::::::::\n')
-        for submission in self.__subreddit.get_hot(limit=self.__batch_size):
+        for submission in self.__subreddit.get_hot(limit=self.__config['batch_size']):
             c += 1
-            if submission not in self.__done and len(submission.comments) == 0:
+            #if submission not in self.__done and len(submission.comments) == 0:
+            if submission not in self.__done:
                 self.__todo.append(submission)
         logging.info(' Found ' + str(len(self.__todo)) + ' new submissions to process (out of ' + str(c) + ')')
 
     def __process_requests(self):
+        s_id = -1
         for submission in self.__todo:
-            logging.info('\n \t======== BEGIN  SUBMISSION =======')
-            logging.info(' \t' + '\n \t'.join([submission.title[i:i+80] for i in range(0, len(submission.title), 80)]))
+            s_id += 1
+            logging.info('\n \t======== BEGIN  SUBMISSION #' + str(s_id) + ' =======')
+            #logging.info(' \t' + '\n \t'.join([submission.title[i:i+80] for i in range(0, len(submission.title), 80)]))
+            logging.info(' \t' + submission.title)
             logging.debug(' \t--- begin submission text ---')
             logging.debug(' \t> ' + submission.selftext.replace('\n', '\n \t> '))
             logging.debug(' \t---  end submission text  ---')
@@ -192,6 +198,18 @@ def parse_config(config_file):
     d = {}
     for ls in [l.strip().split(' ') for l in config_file]:
         d[ls[0]] = ls[1]
+    # Dry mode
+    if 'dry' in d:
+        if d['dry'].lower() == 'false': d['dry'] = False
+        elif d['dry'].lower() == 'true': d['dry'] = True
+        else: raise ValueError('Invalid "dry" value in configuration file')
+    else:
+        d['dry'] = True
+    # Batch size
+    if 'batch_size' in d:
+        d['batch_size'] = int(d['batch_size'])
+    else:
+        d['batch_size'] = 10
     return d
 
 
@@ -205,8 +223,7 @@ def main(args):
     logging.basicConfig(level=numeric_level, format=logformat) 
     
     config = parse_config(args.config_file)
-    config['dry'] = args.dry
-    scholar_bot = ScholarBot(config=config, batch_size=args.batch_size)
+    scholar_bot = ScholarBot(config=config)
     scholar_bot.run()
 
 
@@ -218,18 +235,6 @@ if __name__ == '__main__':
         nargs='?',
         default=sys.stdin,
         help='Input file'
-    )
-    parser.add_argument(
-        '-b', '--batch_size', dest='batch_size',
-        type=int,
-        default=10,
-        help='Number of posts to fetch'
-    )
-    parser.add_argument(
-        '-d', '--dry', dest='dry',
-        action='store_true',
-        default=False,
-        help='Do not post link in comments'
     )
     parser.add_argument(
         '-l', '--loglevel', dest='loglevel',
