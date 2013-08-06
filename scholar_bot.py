@@ -12,6 +12,7 @@ import datetime
 import urllib
 import urllib2
 import mechanize
+import pyPdf
 from BeautifulSoup import BeautifulSoup
 import praw
 import rest
@@ -91,7 +92,16 @@ class ScholarBot:
             logging.debug('\t\t' + ' ==> '.join([link.text, pdf_url]))
             shutil.move(filepath, filepath+'.pdf')
             filepath += '.pdf'
+            filepath = self.__check_pdf(filepath)
         return filepath
+
+    def __check_pdf(self, filepath):
+        try:
+            doc = pyPdf.PdfFileReader(file(filepath, 'rb'))
+            return filepath
+        except pyPdf.utils.PdfReadError:
+            logging.info(' \t\tInvalid PDF')
+            return None
 
     def __share(self, filepath, name):
         try:
