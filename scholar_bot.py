@@ -13,9 +13,10 @@ import urllib
 import urllib2
 import mechanize
 import pyPdf
-from BeautifulSoup import BeautifulSoup
 import praw
 import rest
+from BeautifulSoup import BeautifulSoup
+from Fetcher import Domain
 
 
 REGEX_URL = re.compile(r'(https?://([-\w\.]+)+(:\d+)?(/([-\w/_\.\#\%]*(\?\S+)?)?)?)')
@@ -40,70 +41,58 @@ class ScholarBot:
         })
 
     def __ez_authenticate(self, url):
+        raw_url = url
+        import traceback
         try:
-            raw_url = url
             self.__br.open(url)
             url = self.__add_proxy_to_url(self.__br.response().geturl())
-            logging.debug(' \t' + raw_url + '\n \t\t~~> ' + url)
             self.__br.open(url)
         except urllib2.HTTPError, e:
-            logging.warning(' \tWARNING: ' + e.msg)
-        if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
-            self.__br.select_form(nr=0)
-            self.__br['username'] = self.__config['ez_usr']
-            self.__br['password'] = self.__config['ez_pwd']
-            self.__br.submit()
+            if e.code == 401:
+                url = self.__add_proxy_to_url(url)
+                try:
+                    self.__br.open(url)
+                except urllib2.HTTPError as e:
+                    logging.warning(' \tWARNING: ' + e.msg)
+                except:
+                    pass
+        logging.debug(' \t\t' + raw_url + '\n \t\t\t~~> ' + url)
+        try:
+            if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
+                self.__br.select_form(nr=0)
+                self.__br['username'] = self.__config['ez_usr']
+                self.__br['password'] = self.__config['ez_pwd']
+                self.__br.submit()
+        except mechanize.BrowserStateError:
+            pass
         return url
 
-    def __add_proxy_to_url(self, url):
-        u = [p for p in url.split('/') if p]
-        u[0] = u[0] + '/'
-        u[1] = u[1] + '.gate1.inist.fr'
-        return '/'.join(u)
+    def __add_proxy_to_url(self, url, proxy='.gate1.inist.fr'):
+        if(proxy) not in url:
+            u = [p for p in url.split('/') if p]
+            u[0] = u[0] + '/'
+            u[1] = u[1] + '.gate1.inist.fr'
+            return '/'.join(u)
+        return url
 
     def __resolve_ncbi(self, url):
         self.__br.open(url)
         logging.info(' \tResolving an NCBI link')
         page = BeautifulSoup(self.__br.response().read())
         try:
-            linkout = page.find('div', {'class': 'linkoutlist'}).findNext('ul').findAll('a')[0]
-            url = linkout.get('href')
+            url = page\
+                    .find('div', {'class': 'linkoutlist'})\
+                    .findNext('ul')\
+                    .findAll('a')[0]\
+                    .get('href')
             logging.debug(' \t\tNCBI ==> ' + url)
         except AttributeError:
             pass
         return url
 
     def __fetch_pdf(self, url):
-        filepath = None
-        pdf_url = None
-        domain = REGEX_DOMAIN.search(url).group()
-        for link in self.__br.links(text_regex='(Full.*Text.*PDF.*)|(.*Download.*PDF.*)|(.*PDF.*\([0-9]+.*\))'):
-            if link.url.endswith('pdf+html'):
-                pdf_url = link.url[:-5]
-                break
-            else:
-                pdf_url = link.url
-                break
-        if pdf_url:
-            if pdf_url.startswith('/'):
-                pdf_url = '/'.join([domain, pdf_url])
-            try:
-                logging.debug('\t\t' + ' ==> '.join([link.text, pdf_url]))
-                filepath = self.__br.retrieve(pdf_url)[0]
-                shutil.move(filepath, filepath+'.pdf')
-                filepath += '.pdf'
-                filepath = self.__check_pdf(filepath)
-            except mechanize.HTTPError:
-                pass
-        return filepath
-
-    def __check_pdf(self, filepath):
-        try:
-            doc = pyPdf.PdfFileReader(file(filepath, 'rb'))
-            return filepath
-        except pyPdf.utils.PdfReadError:
-            logging.info(' \t\tInvalid PDF')
-            return None
+        website = Domain(self.__br)
+        return website.pdf()
 
     def __share(self, filepath, name):
         try:
@@ -160,7 +149,6 @@ class ScholarBot:
                 logging.info(' \tFound ' + str(len(urls)) + ' links')
                 shared_count = 0
                 for url in urls:
-                    logging.debug(' \t\t' + url)
                     if url.startswith('http://www.ncbi.nlm.nih.gov'):
                         url = self.__resolve_ncbi(url)
                     url = self.__ez_authenticate(url)
