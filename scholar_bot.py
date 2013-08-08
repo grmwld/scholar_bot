@@ -15,7 +15,7 @@ import mechanize
 import pyPdf
 import praw
 import rest
-from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 from Fetcher import Domain
 
 
@@ -82,8 +82,8 @@ class ScholarBot:
         try:
             url = page\
                     .find('div', {'class': 'linkoutlist'})\
-                    .findNext('ul')\
-                    .findAll('a')[0]\
+                    .find_next('ul')\
+                    .find_next('a')\
                     .get('href')
             logging.debug(' \t\tNCBI ==> ' + url)
         except AttributeError:
@@ -162,7 +162,7 @@ class ScholarBot:
                 else:
                     self.__current_share.destroy()
             self.__done.append(submission)
-            logging.info(' \t========   END  SUBMISSION  ======')
+            logging.info(' \t========   END  SUBMISSION #' + str(s_id) + ' ======')
         self.__todo = []
 
     def run(self):

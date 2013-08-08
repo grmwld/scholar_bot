@@ -10,7 +10,7 @@ import urllib2
 import shutil
 import mechanize
 import pyPdf
-from BeautifulSoup import BeautifulSoup
+from bs4 import BeautifulSoup
 
 
 
@@ -42,12 +42,13 @@ class Fetcher(object):
             return None
 
     def _retrieve_pdf(self, pdf_text, pdf_url):
+        filepath = None
         if pdf_url:
             if pdf_url.startswith('/'):
                 pdf_url = '/'.join([self.domain, pdf_url])
             try:
                 logging.debug(' \t\t\t' + ' ==> '.join([pdf_text, pdf_url]))
-                filepath = self.br.retrieve(pdf_url)[0]
+                filepath = self.br.retrieve(pdf_ur)[0]
                 shutil.move(filepath, filepath+'.pdf')
                 filepath += '.pdf'
                 filepath = self.check_pdf(filepath)
@@ -76,7 +77,7 @@ class GenericFetcher(Fetcher):
         return False
 
     def _find_pdf(self):
-        filepath = None
+        pdf_text = None
         pdf_url = None
         text_regex = '(Full.*Text.*PDF.*)|(.*Download.*PDF.*)|(.*PDF.*\([0-9]+.*\))'
         links = [l for l in self.br.links(text_regex=text_regex)]
@@ -101,11 +102,11 @@ class SciencedirectFetcher(Fetcher):
         return 'sciencedirect.com' in domain
 
     def _find_pdf(self):
-        filepath = None
+        pdf_text = None
         pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('a', {'id': 'pdfLink'})
-        pdf_text = pdf.getText()
+        pdf_text = pdf.get_text()
         pdf_url = pdf.get('href')
         return [pdf_text, pdf_url]
         
@@ -120,13 +121,13 @@ class NatureFetcher(Fetcher):
         return 'nature.com' in domain
 
     def _find_pdf(self):
-        filepath = None
+        pdf_text = None
         pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('div', {'class': 'article-tools'})\
-                .findNext('li', {'class': 'download-pdf'})\
-                .findNext('a')
-        pdf_text = pdf.getText()
+                .find_next('li', {'class': 'download-pdf'})\
+                .find_next('a')
+        pdf_text = pdf.get_text()
         pdf_url = pdf.get('href')
         return [pdf_text, pdf_url]
 
@@ -141,13 +142,13 @@ class ScienceFetcher(Fetcher):
         return 'sciencemag.org' in domain
 
     def _find_pdf(self):
-        filepath = None
+        pdf_text = None
         pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page\
                 .find('div', {'id': 'article-cb-main'})\
-                .findNext('a', {'rel': 'view-full-text.pdf'})
-        pdf_text = pdf.getText()
+                .find_next('a', {'rel': 'view-full-text.pdf'})
+        pdf_text = pdf.get_text()
         pdf_url = pdf.get('href')
         return [pdf_text, pdf_url]
 
@@ -162,11 +163,10 @@ class WileyFetcher(Fetcher):
         return 'onlinelibrary.wiley.com' in domain
 
     def _find_pdf(self):
-        filepath = None
+        pdf_text = None
         pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('a', {'id': 'journalToolsPdfLink'})
-        pdf_text = pdf.getText()
+        pdf_text = pdf.get_text()
         pdf_url = pdf.get('href')
         return [pdf_text, pdf_url]
-        
