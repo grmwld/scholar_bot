@@ -15,6 +15,7 @@ import mechanize
 import pyPdf
 import praw
 import rest
+import splinter
 from bs4 import BeautifulSoup
 from Fetcher import Domain
 
@@ -30,8 +31,9 @@ class ScholarBot:
         self.__r = praw.Reddit(user_agent=self.__user_agent)
         self.__r.login(self.__config['reddit_usr'] , self.__config['reddit_pwd'])
         self.__subreddit = self.__r.get_subreddit(self.__config['subreddit'])
-        self.__br = mechanize.Browser(factory=mechanize.RobustFactory())
-        self.__br.set_handle_robots(False)
+        self.__br = splinter.Browser('zope.testbrowser')
+        #self.__br = mechanize.Browser(factory=mechanize.RobustFactory())
+        #self.__br.set_handle_robots(False)
         self.__done = []
         self.__todo = []
         self.__gett = rest.User.login({
@@ -44,27 +46,31 @@ class ScholarBot:
         raw_url = url
         import traceback
         try:
-            self.__br.open(url)
-            url = self.__add_proxy_to_url(self.__br.response().geturl())
-            self.__br.open(url)
+            self.__br.visit(url)
+            url = self.__add_proxy_to_url(self.__br.url)
+            self.__br.visit(url)
         except urllib2.HTTPError, e:
             if e.code == 401:
                 url = self.__add_proxy_to_url(url)
                 try:
-                    self.__br.open(url)
+                    self.__br.visit(url)
                 except urllib2.HTTPError as e:
                     logging.warning(' \tWARNING: ' + e.msg)
                 except:
-                    pass
+                    traceback.print_exc()
+        except:
+            traceback.print_exc()
         logging.debug(' \t\t' + raw_url + '\n \t\t\t~~> ' + url)
         try:
-            if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
-                self.__br.select_form(nr=0)
-                self.__br['username'] = self.__config['ez_usr']
-                self.__br['password'] = self.__config['ez_pwd']
-                self.__br.submit()
-        except mechanize.BrowserStateError:
-            pass
+            if self.__br.title == "Service d'authentification de l'Inist-CNRS":
+                #self.__br.select_form(nr=0)
+                self.__br.fill('username', self.__config['ez_usr'])
+                self.__br.fill('password', self.__config['ez_pwd'])
+                self.__br.find_by_name('submit').first.click()
+        except:
+            traceback.print_exc()
+        #except mechanize.BrowserStateError:
+            #pass
         return url
 
     def __add_proxy_to_url(self, url, proxy='.gate1.inist.fr'):
@@ -76,9 +82,9 @@ class ScholarBot:
         return url
 
     def __resolve_ncbi(self, url):
-        self.__br.open(url)
+        self.__br.visit(url)
         logging.info(' \tResolving an NCBI link')
-        page = BeautifulSoup(self.__br.response().read())
+        page = BeautifulSoup(self.__br.html)
         try:
             url = page\
                     .find('div', {'class': 'linkoutlist'})\
@@ -152,7 +158,8 @@ class ScholarBot:
                     if url.startswith('http://www.ncbi.nlm.nih.gov'):
                         url = self.__resolve_ncbi(url)
                     url = self.__ez_authenticate(url)
-                    filepath = self.__fetch_pdf(url)
+                    #filepath = self.__fetch_pdf(url)
+                    filepath = None
                     if filepath:
                         shared_count += 1
                         self.__share(filepath, url)

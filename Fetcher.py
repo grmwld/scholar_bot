@@ -9,6 +9,7 @@ import urllib
 import urllib2
 import shutil
 import mechanize
+import splinter
 import pyPdf
 from bs4 import BeautifulSoup
 
