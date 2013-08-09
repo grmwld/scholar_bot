@@ -11,6 +11,7 @@ import re
 import datetime
 import urllib
 import urllib2
+import urlparse
 import mechanize
 import pyPdf
 import praw
@@ -19,8 +20,13 @@ from bs4 import BeautifulSoup
 from Fetcher import Domain
 
 
-REGEX_URL = re.compile(r'(https?://([-\w\.]+)+(:\d+)?(/([-\w/_\.\#\%]*(\?\S+)?)?)?)')
-REGEX_DOMAIN = re.compile(r'(https?://([-\w\.]+)+(:\d+)?)')
+URL = re.compile(r"""(
+        (?P<scheme>https?)://       # scheme
+        (?P<domain>[-\w\.]+)+       # domain
+        (?P<port>:\d+)?             # port
+        (?P<path>/[-\w/_\.\#\%]*)?  # path
+        (?P<params>\?\S+)?)         # params
+        """, re.VERBOSE)
 
 
 class ScholarBot:
@@ -31,7 +37,10 @@ class ScholarBot:
         self.__r.login(self.__config['reddit_usr'] , self.__config['reddit_pwd'])
         self.__subreddit = self.__r.get_subreddit(self.__config['subreddit'])
         self.__br = mechanize.Browser(factory=mechanize.RobustFactory())
+        self.__br.addheaders = [('User-agent', 'Mozilla/5.0')]
         self.__br.set_handle_robots(False)
+        self.__br.set_handle_redirect(True)
+        self.__br.set_handle_refresh(mechanize._http.HTTPRefreshProcessor(), max_time=10)
         self.__done = []
         self.__todo = []
         self.__gett = rest.User.login({
@@ -43,41 +52,54 @@ class ScholarBot:
     def __ez_authenticate(self, url):
         raw_url = url
         import traceback
-        try:
+        try: # Open the url, follow any redirects and add proxy to the final one
+            self.__br.open(url) # Raises 401 if direct link to PDF
+            url = self.__add_proxy_to_url(self.__br.geturl())
             self.__br.open(url)
-            url = self.__add_proxy_to_url(self.__br.response().geturl())
-            self.__br.open(url)
-        except urllib2.HTTPError, e:
+        except mechanize.HTTPError as e:
+            # Handle 401 from trying to open direct link to PDF
             if e.code == 401:
                 url = self.__add_proxy_to_url(url)
                 try:
                     self.__br.open(url)
-                except urllib2.HTTPError as e:
+                except mechanize.HTTPError as e:
                     logging.warning(' \tWARNING: ' + e.msg)
+                    return None
                 except:
-                    pass
-        logging.debug(' \t\t' + raw_url + '\n \t\t\t~~> ' + url)
+                    if self.__br.response().info().gettype() == 'application/pdf':
+                        pass
+            # Handle 404 if the proxy does not give access to the website
+            elif e.code == 404:
+                return None
+            else:
+                traceback.print_exc()
+        except:
+            traceback.print_exc()
+        logging.debug(' \t\t\t' + url)
         try:
             if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
                 self.__br.select_form(nr=0)
                 self.__br['username'] = self.__config['ez_usr']
                 self.__br['password'] = self.__config['ez_pwd']
                 self.__br.submit()
-        except mechanize.BrowserStateError:
-            pass
+        #except mechanize.BrowserStateError:
+            #pass
+        except:
+            traceback.print_exc()
         return url
 
     def __add_proxy_to_url(self, url, proxy='.gate1.inist.fr'):
-        if(proxy) not in url:
-            u = [p for p in url.split('/') if p]
-            u[0] = u[0] + '/'
-            u[1] = u[1] + '.gate1.inist.fr'
-            return '/'.join(u)
+        if proxy not in url:
+            scheme, domain, port, path, params = URL.match(url).groups()[1:]
+            url = scheme + '://' + domain + proxy
+            if port: url += port
+            if path: url += path
+            if params: url += params
         return url
 
     def __resolve_ncbi(self, url):
         self.__br.open(url)
-        logging.info(' \tResolving an NCBI link')
+        logging.info(' \t\tResolving an NCBI link')
         page = BeautifulSoup(self.__br.response().read())
         try:
             url = page\
@@ -85,7 +107,7 @@ class ScholarBot:
                     .find_next('ul')\
                     .find_next('a')\
                     .get('href')
-            logging.debug(' \t\tNCBI ==> ' + url)
+            logging.debug(' \t\t\tNCBI ==> ' + url)
         except AttributeError:
             pass
         return url
@@ -143,19 +165,21 @@ class ScholarBot:
             logging.debug(' \t--- begin submission text ---')
             logging.debug(' \t> ' + submission.selftext.replace('\n', '\n \t> '))
             logging.debug(' \t---  end submission text  ---')
-            urls = list(set([i[0].strip('(){}[]') for i in REGEX_URL.findall(submission.selftext)]))
+            urls = list(set([i[0].strip('(){}[]') for i in URL.findall(submission.selftext)]))
             if len(urls) > 0:
                 self.__current_share = self.__gett.create_share({'title': submission.title})
                 logging.info(' \tFound ' + str(len(urls)) + ' links')
                 shared_count = 0
                 for url in urls:
+                    logging.debug(' \t\t' + url)
                     if url.startswith('http://www.ncbi.nlm.nih.gov'):
                         url = self.__resolve_ncbi(url)
                     url = self.__ez_authenticate(url)
-                    filepath = self.__fetch_pdf(url)
-                    if filepath:
-                        shared_count += 1
-                        self.__share(filepath, url)
+                    if url:
+                        filepath = self.__fetch_pdf(url)
+                        if filepath:
+                            shared_count += 1
+                            self.__share(filepath, url)
                 if shared_count:
                     if self.__config['dry'] is False:
                         self.__post_link_to_articles(submission)

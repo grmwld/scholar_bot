@@ -11,15 +11,23 @@ import shutil
 import mechanize
 import pyPdf
 from bs4 import BeautifulSoup
+from utils import ErrorIgnore
 
 
+URL = re.compile(r"""(
+        (?P<scheme>https?)://       # scheme
+        (?P<domain>[-\w\.]+)+       # domain
+        (?P<port>:\d+)?             # port
+        (?P<path>/[-\w/_\.\#\%]*)?  # path
+        (?P<params>\?\S+)?)         # params
+        """, re.VERBOSE)
 
-DOMAIN = re.compile(r'(https?://([-\w\.]+)+(:\d+)?)')
 
 
 def Domain(browser):
     url = browser.response().geturl()
-    domain = DOMAIN.search(url).group()
+    #domain = URL.match(url).group('domain')
+    domain = '://'.join(URL.match(url).groups()[1:3])
     for cls in Fetcher.__subclasses__():
         if cls.is_fetcher_for(domain):
             return cls(browser)
@@ -30,7 +38,8 @@ def Domain(browser):
 class Fetcher(object):
     def __init__(self, br):
         self.url = br.response().geturl()
-        self.domain = DOMAIN.search(self.url).group()
+        #self.domain = URL.match(self.url).group('domain')
+        self.domain = '://'.join(URL.match(self.url).groups()[1:3])
         self.br = br
 
     def check_pdf(self, filepath):
@@ -48,7 +57,7 @@ class Fetcher(object):
                 pdf_url = '/'.join([self.domain, pdf_url])
             try:
                 logging.debug(' \t\t\t' + ' ==> '.join([pdf_text, pdf_url]))
-                filepath = self.br.retrieve(pdf_ur)[0]
+                filepath = self.br.retrieve(pdf_url)[0]
                 shutil.move(filepath, filepath+'.pdf')
                 filepath += '.pdf'
                 filepath = self.check_pdf(filepath)
@@ -60,10 +69,11 @@ class Fetcher(object):
         pass
 
     def pdf(self):
-        filepath = self._retrieve_pdf('Current page', self.url)
-        if not filepath:
+        if self.br.response().info().gettype() == 'application/pdf':
+            filepath = self._retrieve_pdf('Current page', self.url)
+        else:
             pdf_text, pdf_url = self._find_pdf()
-            return self._retrieve_pdf(pdf_text, pdf_url)
+            filepath = self._retrieve_pdf(pdf_text, pdf_url)
         return filepath
 
 
@@ -101,9 +111,8 @@ class SciencedirectFetcher(Fetcher):
     def is_fetcher_for(cls, domain):
         return 'sciencedirect.com' in domain
 
+    @ErrorIgnore(errors=[AttributeError], errorreturn=[None, None])
     def _find_pdf(self):
-        pdf_text = None
-        pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('a', {'id': 'pdfLink'})
         pdf_text = pdf.get_text()
@@ -120,9 +129,8 @@ class NatureFetcher(Fetcher):
     def is_fetcher_for(cls, domain):
         return 'nature.com' in domain
 
+    @ErrorIgnore(errors=[AttributeError], errorreturn=[None, None])
     def _find_pdf(self):
-        pdf_text = None
-        pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('div', {'class': 'article-tools'})\
                 .find_next('li', {'class': 'download-pdf'})\
@@ -141,9 +149,8 @@ class ScienceFetcher(Fetcher):
     def is_fetcher_for(cls, domain):
         return 'sciencemag.org' in domain
 
+    @ErrorIgnore(errors=[AttributeError], errorreturn=[None, None])
     def _find_pdf(self):
-        pdf_text = None
-        pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page\
                 .find('div', {'id': 'article-cb-main'})\
@@ -162,11 +169,13 @@ class WileyFetcher(Fetcher):
     def is_fetcher_for(cls, domain):
         return 'onlinelibrary.wiley.com' in domain
 
+    @ErrorIgnore(errors=[AttributeError], errorreturn=[None, None])
     def _find_pdf(self):
-        pdf_text = None
-        pdf_url = None
         page = BeautifulSoup(self.br.response().read())
         pdf = page.find('a', {'id': 'journalToolsPdfLink'})
-        pdf_text = pdf.get_text()
-        pdf_url = pdf.get('href')
+        self.br.open(pdf.get('href'))
+        page = BeautifulSoup(self.br.response().read())
+        pdf = page.find('iframe', {'id': 'pdfDocument'})
+        pdf_text = 'Current page'
+        pdf_url = pdf.get('src')
         return [pdf_text, pdf_url]
