@@ -67,7 +67,7 @@ class ScholarBot:
                     return None
                 except:
                     if self.__br.response().info().gettype() == 'application/pdf':
-                        pass
+                        return url
             # Handle 404 if the proxy does not give access to the website
             elif e.code == 404:
                 return None
@@ -76,16 +76,11 @@ class ScholarBot:
         except:
             traceback.print_exc()
         logging.debug(' \t\t\t' + url)
-        try:
-            if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
-                self.__br.select_form(nr=0)
-                self.__br['username'] = self.__config['ez_usr']
-                self.__br['password'] = self.__config['ez_pwd']
-                self.__br.submit()
-        #except mechanize.BrowserStateError:
-            #pass
-        except:
-            traceback.print_exc()
+        if self.__br.title() == "Service d'authentification de l'Inist-CNRS":
+            self.__br.select_form(nr=0)
+            self.__br['username'] = self.__config['ez_usr']
+            self.__br['password'] = self.__config['ez_pwd']
+            self.__br.submit()
         return url
 
     def __add_proxy_to_url(self, url, proxy='.gate1.inist.fr'):
